@@ -1,0 +1,80 @@
+"""Preprocesamiento de audio antes de la detección de pitch."""
+
+import numpy as np
+import librosa
+
+
+def preprocess_audio(
+    audio: np.ndarray,
+    sr: int,
+    trim_silence: bool = True,
+    normalize: bool = True,
+    top_db: int = 30,
+) -> np.ndarray:
+    """
+    Preprocesa audio para mejorar la detección de pitch.
+
+    Args:
+        audio: Array numpy con muestras de audio (mono)
+        sr: Sample rate
+        trim_silence: Recortar silencio al inicio y final
+        normalize: Normalizar amplitud
+        top_db: Umbral en dB para trim de silencio
+
+    Returns:
+        Audio preprocesado como numpy array
+    """
+    if len(audio) == 0:
+        return audio
+
+    # 1. Normalizar amplitud (pico a 1.0)
+    if normalize:
+        peak = np.max(np.abs(audio))
+        if peak > 0:
+            audio = audio / peak
+
+    # 2. Recortar silencio al inicio y final
+    if trim_silence:
+        audio, _ = librosa.effects.trim(audio, top_db=top_db)
+
+    return audio
+
+
+def compute_frame_energy(audio: np.ndarray, sr: int, hop_ms: float = 10.0) -> np.ndarray:
+    """
+    Calcula la energía RMS por frame del audio.
+
+    Args:
+        audio: Array numpy de audio
+        sr: Sample rate
+        hop_ms: Tamaño del hop en milisegundos
+
+    Returns:
+        Array con energía RMS por frame
+    """
+    hop_samples = int(sr * hop_ms / 1000.0)
+    n_frames = len(audio) // hop_samples + 1
+
+    energy = np.zeros(n_frames)
+    for i in range(n_frames):
+        start = i * hop_samples
+        end = min(start + hop_samples, len(audio))
+        if end > start:
+            energy[i] = np.sqrt(np.mean(audio[start:end] ** 2))
+
+    return energy
+
+
+def compute_energy_threshold(energy: np.ndarray, percentile: float = 25.0) -> float:
+    """
+    Calcula un umbral adaptivo de energía para separar voz de silencio.
+
+    Args:
+        energy: Array de energía por frame
+        percentile: Percentil para el umbral (default: 25)
+
+    Returns:
+        Umbral de energía
+    """
+    threshold = np.percentile(energy, percentile)
+    return max(threshold, 0.01)  # Mínimo absoluto

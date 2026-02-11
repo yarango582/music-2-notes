@@ -95,25 +95,46 @@ def process_audio_file(
         sys.exit(1)
 
     # 4. Filtrar y segmentar notas
-    print(f"\n🎼 Segmentando notas (umbral: {confidence_threshold})...")
+    print(f"\n🎼 Segmentando notas...")
 
-    # Filtrar frecuencias válidas
-    valid_mask = frequency > 50  # Hz mínimo
-    valid_indices = torch.where(valid_mask)[0]
+    # Calcular amplitud del audio para filtrar mejor
+    # Usar ventanas de audio para detectar actividad vocal real
+    hop_samples = int(sr * 0.01)  # 10ms
+    frame_energy = []
 
-    if len(valid_indices) == 0:
-        print("   ⚠️  No se detectaron notas válidas")
-        return [], {}
+    for i in range(len(frequency)):
+        start_sample = i * hop_samples
+        end_sample = min(start_sample + hop_samples, len(audio))
+        if end_sample > start_sample:
+            frame_audio = audio[start_sample:end_sample]
+            energy = np.sqrt(np.mean(frame_audio ** 2))  # RMS energy
+            frame_energy.append(energy)
+        else:
+            frame_energy.append(0)
 
+    frame_energy = np.array(frame_energy)
+
+    # Threshold adaptivo: usar percentil para filtrar silencio
+    energy_threshold = np.percentile(frame_energy, 25)  # 25% más bajo es silencio
+    min_energy = max(energy_threshold, 0.01)  # Mínimo absoluto
+
+    print(f"   ℹ️  Umbral de energía: {min_energy:.4f}")
+
+    # Filtrar frecuencias válidas con energía suficiente
     notes = []
     current_midi = None
     note_start = None
     note_freqs = []
+    min_freq = 80  # Hz mínimo (aprox. E2, por debajo es ruido)
 
     for i in range(len(time)):
         freq = frequency[i].item()
+        energy = frame_energy[i] if i < len(frame_energy) else 0
 
-        if freq > 50:  # Frecuencia válida
+        # Considerar válido si tiene frecuencia Y energía suficiente
+        is_valid = freq > min_freq and energy > min_energy
+
+        if is_valid:  # Frecuencia válida con energía
             midi_num = hz_to_midi(freq)
 
             if current_midi is None:
@@ -179,7 +200,12 @@ def process_audio_file(
             )
             notes.append(note)
 
+    total_frames = len(time)
+    valid_frames = sum(1 for i in range(len(time)) if i < len(frame_energy) and frame_energy[i] > min_energy and frequency[i].item() > min_freq)
+
     print(f"   ✓ {len(notes)} notas detectadas")
+    print(f"   ℹ️  Frames procesados: {total_frames}")
+    print(f"   ℹ️  Frames válidos (con energía): {valid_frames} ({valid_frames/total_frames*100:.1f}%)")
 
     # Metadata
     metadata = {
@@ -195,29 +221,80 @@ def process_audio_file(
 
 
 def generate_midi(notes: list[Note], output_path: Path, tempo: int = 120) -> None:
-    """Genera archivo MIDI desde lista de notas."""
-    mid = MidiFile()
+    """
+    Genera archivo MIDI desde lista de notas con timing correcto.
+
+    El timing en MIDI usa 'delta time' (tiempo desde el evento anterior),
+    no tiempo absoluto. Esto mantiene el tempo original del audio.
+    """
+    mid = MidiFile(ticks_per_beat=480)  # Standard MIDI resolution
     track = MidiTrack()
     mid.tracks.append(track)
 
-    # Tempo (120 BPM = 500000 microsegundos por beat)
-    track.append(MetaMessage("set_tempo", tempo=mido.bpm2tempo(tempo)))
+    # Tempo en microsegundos por beat
+    track.append(MetaMessage("set_tempo", tempo=mido.bpm2tempo(tempo), time=0))
 
-    # Convertir notas a eventos MIDI
-    ticks_per_second = mid.ticks_per_beat * (tempo / 60)
+    # Crear lista de eventos MIDI (note_on y note_off) con timestamps absolutos
+    events = []
 
     for note in notes:
-        # Note ON
-        time_ticks = int(note.start_time * ticks_per_second)
-        track.append(
-            Message("note_on", note=note.midi_number, velocity=note.velocity, time=0)
+        # Evento Note ON
+        events.append(
+            {
+                "time": note.start_time,
+                "type": "note_on",
+                "note": note.midi_number,
+                "velocity": note.velocity,
+            }
         )
 
-        # Note OFF
-        duration_ticks = int(note.duration * ticks_per_second)
-        track.append(
-            Message("note_off", note=note.midi_number, velocity=0, time=duration_ticks)
+        # Evento Note OFF
+        events.append(
+            {
+                "time": note.end_time,
+                "type": "note_off",
+                "note": note.midi_number,
+                "velocity": 0,
+            }
         )
+
+    # Ordenar eventos por tiempo
+    events.sort(key=lambda x: x["time"])
+
+    # Convertir timestamps absolutos (segundos) a delta ticks
+    # Formula: ticks = segundos * ticks_per_beat * (BPM / 60)
+    ticks_per_second = mid.ticks_per_beat * (tempo / 60.0)
+
+    last_tick = 0
+    for event in events:
+        # Convertir tiempo absoluto a ticks
+        absolute_tick = int(event["time"] * ticks_per_second)
+
+        # Calcular delta (tiempo desde último evento)
+        delta_tick = absolute_tick - last_tick
+        delta_tick = max(0, delta_tick)  # Asegurar no negativo
+
+        # Agregar mensaje MIDI con delta time
+        if event["type"] == "note_on":
+            track.append(
+                Message(
+                    "note_on",
+                    note=event["note"],
+                    velocity=event["velocity"],
+                    time=delta_tick,
+                )
+            )
+        else:  # note_off
+            track.append(
+                Message(
+                    "note_off",
+                    note=event["note"],
+                    velocity=event["velocity"],
+                    time=delta_tick,
+                )
+            )
+
+        last_tick = absolute_tick
 
     mid.save(output_path)
     print(f"   ✓ MIDI guardado: {output_path}")
