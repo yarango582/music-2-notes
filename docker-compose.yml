@@ -1,0 +1,124 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: music2notes-postgres
+    environment:
+      POSTGRES_DB: music2notes
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: devpass123
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev -d music2notes"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - music2notes-network
+
+  # Redis Message Broker & Result Backend
+  redis:
+    image: redis:7-alpine
+    container_name: music2notes-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - music2notes-network
+
+  # FastAPI Application (Uncomment when ready)
+  # api:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.api
+  #   container_name: music2notes-api
+  #   command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+  #   volumes:
+  #     - .:/app
+  #     - audio_storage:/app/storage
+  #   ports:
+  #     - "8000:8000"
+  #   environment:
+  #     DATABASE_URL: postgresql+asyncpg://dev:devpass123@postgres:5432/music2notes
+  #     REDIS_URL: redis://redis:6379/0
+  #     CELERY_BROKER_URL: redis://redis:6379/0
+  #     CELERY_RESULT_BACKEND: redis://redis:6379/1
+  #     STORAGE_TYPE: local
+  #     STORAGE_PATH: /app/storage
+  #     ENV: development
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - music2notes-network
+
+  # Celery Worker (Uncomment when ready)
+  # worker:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.worker
+  #   container_name: music2notes-worker
+  #   command: celery -A src.workers.celery_app worker --loglevel=info --concurrency=2
+  #   volumes:
+  #     - .:/app
+  #     - audio_storage:/app/storage
+  #   environment:
+  #     DATABASE_URL: postgresql+asyncpg://dev:devpass123@postgres:5432/music2notes
+  #     REDIS_URL: redis://redis:6379/0
+  #     CELERY_BROKER_URL: redis://redis:6379/0
+  #     CELERY_RESULT_BACKEND: redis://redis:6379/1
+  #     STORAGE_TYPE: local
+  #     STORAGE_PATH: /app/storage
+  #     ENV: development
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - music2notes-network
+
+  # Flower - Celery Monitoring UI (Uncomment when ready)
+  # flower:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.worker
+  #   container_name: music2notes-flower
+  #   command: celery -A src.workers.celery_app flower --port=5555
+  #   ports:
+  #     - "5555:5555"
+  #   environment:
+  #     CELERY_BROKER_URL: redis://redis:6379/0
+  #     CELERY_RESULT_BACKEND: redis://redis:6379/1
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - music2notes-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  audio_storage:
+    driver: local
+
+networks:
+  music2notes-network:
+    driver: bridge
