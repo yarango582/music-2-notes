@@ -7,11 +7,11 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc g++ && \
     rm -rf /var/lib/apt/lists/*
 
-# Instalar PyTorch CPU-only PRIMERO (evita descargar CUDA ~2GB)
+# Instalar PyTorch + torchaudio CPU-only (evita CUDA ~6GB)
 RUN pip install --no-cache-dir \
-    torch --index-url https://download.pytorch.org/whl/cpu
+    torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-# Instalar resto de dependencias
+# Instalar resto de dependencias (torch ya esta, no se reinstala)
 COPY pyproject.toml .
 RUN pip install --no-cache-dir .
 
