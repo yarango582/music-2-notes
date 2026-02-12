@@ -68,8 +68,8 @@ dmypy.json
 logs/
 *.log
 
-# Storage
-storage/
+# Storage (only root level, not src/storage/)
+/storage/
 uploads/
 temp/
 
