@@ -35,9 +35,10 @@ COPY src/ src/
 # Crear carpetas necesarias
 RUN mkdir -p data storage
 
-EXPOSE 8000
+ENV PORT=8000
+EXPOSE ${PORT}
 
 HEALTHCHECK --interval=30s --timeout=5s \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT}/api/v1/health')" || exit 1
 
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD uvicorn src.api.main:app --host 0.0.0.0 --port ${PORT}
