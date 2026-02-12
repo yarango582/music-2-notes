@@ -10,10 +10,10 @@ class JobOptions(BaseModel):
         description="Modelo CREPE: tiny (rápido) o full (preciso)",
     )
     confidence_threshold: float = Field(
-        default=0.5,
+        default=0.95,
         ge=0.0,
         le=1.0,
-        description="Umbral mínimo de confianza",
+        description="Umbral mínimo de confianza del modelo CREPE (0.95 recomendado)",
     )
     webhook_url: str | None = Field(
         default=None,

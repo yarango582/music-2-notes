@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     # Audio processing
     DEFAULT_MODEL_SIZE: str = "tiny"
-    DEFAULT_CONFIDENCE_THRESHOLD: float = 0.5
+    DEFAULT_CONFIDENCE_THRESHOLD: float = 0.95
     DEFAULT_MIN_NOTE_DURATION: float = 0.05
     MAX_AUDIO_FILE_SIZE: int = 100 * 1024 * 1024  # 100MB
     MAX_AUDIO_DURATION: float = 600  # 10 minutos

@@ -10,6 +10,7 @@ def segment_notes(
     frames: list[PitchFrame],
     energy: np.ndarray | None = None,
     energy_threshold: float = 0.01,
+    confidence_threshold: float = 0.95,
     min_freq: float = 80.0,
     min_note_duration: float = 0.05,
 ) -> list[Note]:
@@ -17,12 +18,13 @@ def segment_notes(
     Convierte una secuencia de PitchFrames en notas musicales discretas.
 
     Agrupa frames consecutivos con el mismo número MIDI en una sola nota.
-    Filtra por energía (si se provee) y frecuencia mínima.
+    Filtra por energía (si se provee), confianza del modelo y frecuencia mínima.
 
     Args:
         frames: Lista de PitchFrame del pitch detector
         energy: Array de energía RMS por frame (opcional)
         energy_threshold: Umbral mínimo de energía
+        confidence_threshold: Umbral mínimo de confianza del modelo (0-1)
         min_freq: Frecuencia mínima en Hz (por debajo se considera ruido)
         min_note_duration: Duración mínima de una nota en segundos
 
@@ -44,7 +46,7 @@ def segment_notes(
         if energy is not None and i < len(energy):
             has_energy = energy[i] > energy_threshold
 
-        is_valid = frame.frequency > min_freq and frame.confidence > 0 and has_energy
+        is_valid = frame.frequency > min_freq and frame.confidence >= confidence_threshold and has_energy
 
         if is_valid:
             midi_num = hz_to_midi(frame.frequency)

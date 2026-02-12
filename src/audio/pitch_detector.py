@@ -36,35 +36,33 @@ def detect_pitches(
     # Preparar tensor
     audio_tensor = torch.from_numpy(audio).unsqueeze(0).to(device)
 
-    # Ejecutar predicción
-    pitch = torchcrepe.predict(
+    # Ejecutar predicción con periodicity (confianza real del modelo)
+    pitch, periodicity = torchcrepe.predict(
         audio_tensor,
         sample_rate=sr,
         model=model_size,
         batch_size=1,
         device=device,
+        return_periodicity=True,
     )
 
     # Extraer resultados
     frequency = pitch[0].cpu()  # Shape: (n_frames,)
+    confidence = periodicity[0].cpu()  # Shape: (n_frames,)
     n_frames = len(frequency)
 
     # Generar timestamps (10ms por frame, default de torchcrepe)
     hop_ms = 10.0
     timestamps = np.arange(n_frames) * (hop_ms / 1000.0)
 
-    # Construir lista de PitchFrames
+    # Construir lista de PitchFrames con confianza real del modelo
     frames = []
     for i in range(n_frames):
-        freq = frequency[i].item()
-        # Confianza: 1.0 si frecuencia es razonable, 0.0 si no
-        conf = 1.0 if freq > 50 else 0.0
-
         frames.append(
             PitchFrame(
                 time=timestamps[i],
-                frequency=max(freq, 0.0),
-                confidence=conf,
+                frequency=max(frequency[i].item(), 0.0),
+                confidence=confidence[i].item(),
             )
         )
 

@@ -52,7 +52,10 @@ def _run_audio_pipeline(
     # 5. Calcular energía y segmentar notas
     energy = compute_frame_energy(audio, sr)
     threshold = compute_energy_threshold(energy)
-    notes = segment_notes(frames, energy=energy, energy_threshold=threshold)
+    notes = segment_notes(
+        frames, energy=energy, energy_threshold=threshold,
+        confidence_threshold=confidence_threshold,
+    )
 
     # 6. Generar outputs
     results_dir = Path(settings.STORAGE_PATH) / "results" / job_id
