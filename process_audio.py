@@ -45,8 +45,8 @@ Modelos disponibles:
         default="tiny", help="Modelo TorchCREPE (default: tiny)",
     )
     parser.add_argument(
-        "--confidence", "-c", type=float, default=0.95,
-        help="Umbral de confianza 0-1 (default: 0.95)",
+        "--confidence", "-c", type=float, default=0.85,
+        help="Umbral de confianza 0-1 (default: 0.85)",
     )
 
     args = parser.parse_args()

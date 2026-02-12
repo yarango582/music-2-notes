@@ -65,16 +65,23 @@ def compute_frame_energy(audio: np.ndarray, sr: int, hop_ms: float = 10.0) -> np
     return energy
 
 
-def compute_energy_threshold(energy: np.ndarray, percentile: float = 25.0) -> float:
+def compute_energy_threshold(energy: np.ndarray, percentile: float = 15.0) -> float:
     """
     Calcula un umbral adaptivo de energía para separar voz de silencio.
 
+    El umbral se basa en un percentil bajo de la energia (los frames mas
+    silenciosos), con un minimo y maximo para evitar filtrar demasiado.
+
     Args:
         energy: Array de energía por frame
-        percentile: Percentil para el umbral (default: 25)
+        percentile: Percentil para el umbral (default: 15)
 
     Returns:
         Umbral de energía
     """
     threshold = np.percentile(energy, percentile)
-    return max(threshold, 0.01)  # Mínimo absoluto
+    # Minimo: no filtrar nada si todo es silencio
+    # Maximo: nunca usar mas del 10% de la energia mediana como umbral
+    median_energy = np.median(energy)
+    cap = median_energy * 0.1
+    return max(min(threshold, cap), 0.005)
