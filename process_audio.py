@@ -19,9 +19,13 @@ import torch
 from src.audio.loader import load_audio, get_audio_info, AudioLoadError
 from src.audio.preprocessor import preprocess_audio, compute_frame_energy, compute_energy_threshold
 from src.audio.pitch_detector import detect_pitches
-from src.audio.note_segmenter import segment_notes
+from src.audio.pitch_post_processor import post_process_pitch
+from src.audio.note_segmenter import (
+    segment_notes, merge_same_pitch_notes, refine_onsets, filter_short_notes,
+)
 from src.audio.midi_generator import generate_midi
 from src.audio.json_formatter import format_result
+from src.core.config import settings
 
 
 def main():
@@ -45,8 +49,8 @@ Modelos disponibles:
         default="tiny", help="Modelo TorchCREPE (default: tiny)",
     )
     parser.add_argument(
-        "--confidence", "-c", type=float, default=0.95,
-        help="Umbral de confianza 0-1 (default: 0.95)",
+        "--confidence", "-c", type=float, default=0.5,
+        help="Umbral de confianza 0-1 (default: 0.5)",
     )
 
     args = parser.parse_args()
@@ -82,10 +86,24 @@ Modelos disponibles:
     if args.model == "full":
         print("  Modelo 'full' puede tardar varios minutos...")
 
-    frames = detect_pitches(audio, sr, model_size=args.model, device=device)
+    frames = detect_pitches(
+        audio, sr, model_size=args.model, device=device,
+        batch_size=settings.CREPE_BATCH_SIZE,
+        fmin=settings.CREPE_FMIN,
+        fmax=settings.CREPE_FMAX,
+    )
     print(f"  {len(frames)} frames detectados")
 
-    # 4. Segmentar notas con filtrado de energia y confianza
+    # 4. Post-procesar pitch (filtro mediano + suavizado vibrato)
+    frames = post_process_pitch(
+        frames,
+        median_window=settings.PITCH_MEDIAN_WINDOW,
+        vibrato_smooth_window=settings.VIBRATO_SMOOTH_WINDOW,
+        vibrato_extent_cents=settings.VIBRATO_EXTENT_CENTS,
+    )
+    print(f"  Pitch post-procesado (median={settings.PITCH_MEDIAN_WINDOW}, vibrato={settings.VIBRATO_SMOOTH_WINDOW})")
+
+    # 5. Segmentar notas con filtrado de energia y confianza
     energy = compute_frame_energy(audio, sr)
     threshold = compute_energy_threshold(energy)
     notes = segment_notes(
@@ -93,7 +111,16 @@ Modelos disponibles:
         confidence_threshold=args.confidence,
         time_offset=trim_offset,
     )
-    print(f"  {len(notes)} notas detectadas (confianza >= {args.confidence})")
+    print(f"  {len(notes)} notas segmentadas (confianza >= {args.confidence})")
+
+    # 6. Post-procesar notas: merge + onset refinement + filter
+    notes = merge_same_pitch_notes(notes, max_gap=settings.NOTE_MERGE_MAX_GAP)
+    notes = refine_onsets(
+        notes, energy=energy, time_offset=trim_offset,
+        lookback_frames=settings.ONSET_LOOKBACK_FRAMES,
+    )
+    notes = filter_short_notes(notes, min_duration=settings.POST_MERGE_MIN_DURATION)
+    print(f"  {len(notes)} notas finales (post merge+onset+filter)")
 
     if not notes:
         print("\nNo se detectaron notas en el audio.")

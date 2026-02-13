@@ -5,6 +5,7 @@ from typing import Literal
 import numpy as np
 import torch
 import torchcrepe
+import torchcrepe.decode
 
 from src.audio.models import PitchFrame
 
@@ -17,6 +18,9 @@ def detect_pitches(
     sr: int,
     model_size: ModelSize = "tiny",
     device: str | None = None,
+    batch_size: int = 512,
+    fmin: float = 65.0,
+    fmax: float = 1047.0,
 ) -> list[PitchFrame]:
     """
     Detecta pitch frame a frame usando TorchCREPE.
@@ -26,6 +30,9 @@ def detect_pitches(
         sr: Sample rate del audio
         model_size: Tamaño del modelo ('tiny' o 'full')
         device: Device de PyTorch (None = auto-detect)
+        batch_size: Batch size para inferencia (512 óptimo para GPU)
+        fmin: Frecuencia mínima en Hz (65 = C2)
+        fmax: Frecuencia máxima en Hz (1047 = C6)
 
     Returns:
         Lista de PitchFrame con tiempo, frecuencia y confianza
@@ -36,34 +43,39 @@ def detect_pitches(
     # Preparar tensor
     audio_tensor = torch.from_numpy(audio).unsqueeze(0).to(device)
 
-    # Ejecutar predicción con periodicity (confianza real del modelo)
+    # Ejecutar predicción con Viterbi decoding y rango vocal
     pitch, periodicity = torchcrepe.predict(
         audio_tensor,
         sample_rate=sr,
         model=model_size,
-        batch_size=1,
+        batch_size=batch_size,
         device=device,
         return_periodicity=True,
+        decoder=torchcrepe.decode.viterbi,
+        fmin=fmin,
+        fmax=fmax,
     )
 
-    # Extraer resultados
-    frequency = pitch[0].cpu()  # Shape: (n_frames,)
-    confidence = periodicity[0].cpu()  # Shape: (n_frames,)
-    n_frames = len(frequency)
+    # Extraer resultados como numpy arrays
+    freq_np = pitch[0].cpu().numpy()
+    conf_np = periodicity[0].cpu().numpy()
+    n_frames = len(freq_np)
 
-    # Generar timestamps (10ms por frame, default de torchcrepe)
+    # Clamp frecuencias negativas
+    freq_np = np.maximum(freq_np, 0.0)
+
+    # Timestamps (10ms por frame, default torchcrepe)
     hop_ms = 10.0
     timestamps = np.arange(n_frames) * (hop_ms / 1000.0)
 
-    # Construir lista de PitchFrames con confianza real del modelo
-    frames = []
-    for i in range(n_frames):
-        frames.append(
-            PitchFrame(
-                time=timestamps[i],
-                frequency=max(frequency[i].item(), 0.0),
-                confidence=confidence[i].item(),
-            )
+    # Construir PitchFrames vectorizado
+    frames = [
+        PitchFrame(
+            time=timestamps[i],
+            frequency=float(freq_np[i]),
+            confidence=float(conf_np[i]),
         )
+        for i in range(n_frames)
+    ]
 
     return frames

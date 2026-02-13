@@ -14,7 +14,10 @@ import httpx
 from src.audio.loader import load_audio, get_audio_info
 from src.audio.preprocessor import preprocess_audio, compute_frame_energy, compute_energy_threshold
 from src.audio.pitch_detector import detect_pitches
-from src.audio.note_segmenter import segment_notes
+from src.audio.pitch_post_processor import post_process_pitch
+from src.audio.note_segmenter import (
+    segment_notes, merge_same_pitch_notes, refine_onsets, filter_short_notes,
+)
 from src.audio.midi_generator import generate_midi
 from src.audio.json_formatter import format_result, save_json
 from src.core.config import settings
@@ -46,10 +49,23 @@ def _run_audio_pipeline(
     # 3. Preprocesar (retorna offset del silencio recortado al inicio)
     audio, trim_offset = preprocess_audio(audio, sr)
 
-    # 4. Detectar pitch
-    frames = detect_pitches(audio, sr, model_size=model_size)
+    # 4. Detectar pitch (optimizado: batch=512, fmin/fmax vocal, viterbi)
+    frames = detect_pitches(
+        audio, sr, model_size=model_size,
+        batch_size=settings.CREPE_BATCH_SIZE,
+        fmin=settings.CREPE_FMIN,
+        fmax=settings.CREPE_FMAX,
+    )
 
-    # 5. Calcular energía y segmentar notas
+    # 5. Post-procesar pitch (filtro mediano + suavizado vibrato)
+    frames = post_process_pitch(
+        frames,
+        median_window=settings.PITCH_MEDIAN_WINDOW,
+        vibrato_smooth_window=settings.VIBRATO_SMOOTH_WINDOW,
+        vibrato_extent_cents=settings.VIBRATO_EXTENT_CENTS,
+    )
+
+    # 6. Calcular energía y segmentar notas
     #    El trim_offset se suma a los timestamps para mantener sincronización
     #    con el audio original (ej: si la canción tiene 23s de intro instrumental)
     energy = compute_frame_energy(audio, sr)
@@ -59,6 +75,14 @@ def _run_audio_pipeline(
         confidence_threshold=confidence_threshold,
         time_offset=trim_offset,
     )
+
+    # 7. Post-procesar notas: merge gaps + onset refinement + filter cortas
+    notes = merge_same_pitch_notes(notes, max_gap=settings.NOTE_MERGE_MAX_GAP)
+    notes = refine_onsets(
+        notes, energy=energy, time_offset=trim_offset,
+        lookback_frames=settings.ONSET_LOOKBACK_FRAMES,
+    )
+    notes = filter_short_notes(notes, min_duration=settings.POST_MERGE_MIN_DURATION)
 
     # 6. Generar outputs
     results_dir = Path(settings.STORAGE_PATH) / "results" / job_id

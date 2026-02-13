@@ -24,7 +24,7 @@ _background_tasks: set[asyncio.Task] = set()
 async def create_audio_job(
     audio_file: UploadFile = File(..., description="Archivo de audio (WAV, MP3, FLAC)"),
     model_size: str = Form(default="tiny", description="Modelo: tiny o full"),
-    confidence_threshold: float = Form(default=0.85, description="Umbral de confianza (0.85 recomendado)"),
+    confidence_threshold: float = Form(default=0.5, description="Umbral de confianza (0.5 recomendado)"),
     webhook_url: str | None = Form(default=None, description="URL de webhook"),
     session: AsyncSession = Depends(get_session),
 ):
