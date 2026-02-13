@@ -43,18 +43,21 @@ def _run_audio_pipeline(
     # 2. Cargar audio
     audio, sr = load_audio(audio_file_path, target_sr=16000, mono=True)
 
-    # 3. Preprocesar
-    audio = preprocess_audio(audio, sr)
+    # 3. Preprocesar (retorna offset del silencio recortado al inicio)
+    audio, trim_offset = preprocess_audio(audio, sr)
 
     # 4. Detectar pitch
     frames = detect_pitches(audio, sr, model_size=model_size)
 
     # 5. Calcular energía y segmentar notas
+    #    El trim_offset se suma a los timestamps para mantener sincronización
+    #    con el audio original (ej: si la canción tiene 23s de intro instrumental)
     energy = compute_frame_energy(audio, sr)
     threshold = compute_energy_threshold(energy)
     notes = segment_notes(
         frames, energy=energy, energy_threshold=threshold,
         confidence_threshold=confidence_threshold,
+        time_offset=trim_offset,
     )
 
     # 6. Generar outputs

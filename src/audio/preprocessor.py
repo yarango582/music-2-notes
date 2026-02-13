@@ -10,7 +10,7 @@ def preprocess_audio(
     trim_silence: bool = True,
     normalize: bool = True,
     top_db: int = 30,
-) -> np.ndarray:
+) -> tuple[np.ndarray, float]:
     """
     Preprocesa audio para mejorar la detección de pitch.
 
@@ -22,10 +22,15 @@ def preprocess_audio(
         top_db: Umbral en dB para trim de silencio
 
     Returns:
-        Audio preprocesado como numpy array
+        Tupla (audio_preprocesado, offset_seconds).
+        offset_seconds indica cuántos segundos de silencio se recortaron
+        del inicio, para sumar ese offset a los timestamps de las notas
+        y mantener la sincronización con el audio original.
     """
+    offset_seconds = 0.0
+
     if len(audio) == 0:
-        return audio
+        return audio, offset_seconds
 
     # 1. Normalizar amplitud (pico a 1.0)
     if normalize:
@@ -35,9 +40,12 @@ def preprocess_audio(
 
     # 2. Recortar silencio al inicio y final
     if trim_silence:
-        audio, _ = librosa.effects.trim(audio, top_db=top_db)
+        audio_trimmed, trim_indices = librosa.effects.trim(audio, top_db=top_db)
+        # trim_indices = [start_sample, end_sample] de la region no silenciosa
+        offset_seconds = trim_indices[0] / sr
+        audio = audio_trimmed
 
-    return audio
+    return audio, offset_seconds
 
 
 def compute_frame_energy(audio: np.ndarray, sr: int, hop_ms: float = 10.0) -> np.ndarray:

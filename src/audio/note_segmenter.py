@@ -13,6 +13,7 @@ def segment_notes(
     confidence_threshold: float = 0.95,
     min_freq: float = 80.0,
     min_note_duration: float = 0.05,
+    time_offset: float = 0.0,
 ) -> list[Note]:
     """
     Convierte una secuencia de PitchFrames en notas musicales discretas.
@@ -27,6 +28,8 @@ def segment_notes(
         confidence_threshold: Umbral mínimo de confianza del modelo (0-1)
         min_freq: Frecuencia mínima en Hz (por debajo se considera ruido)
         min_note_duration: Duración mínima de una nota en segundos
+        time_offset: Offset en segundos para sumar a los timestamps (ej: silencio
+            recortado del inicio del audio original)
 
     Returns:
         Lista de notas musicales detectadas, ordenadas por tiempo
@@ -67,7 +70,7 @@ def segment_notes(
                 # Cambio de nota: guardar anterior
                 _maybe_add_note(
                     notes, current_midi, note_start, frame.time,
-                    note_freqs, note_confs, min_note_duration,
+                    note_freqs, note_confs, min_note_duration, time_offset,
                 )
                 # Iniciar nueva
                 current_midi = midi_num
@@ -79,7 +82,7 @@ def segment_notes(
             if current_midi is not None:
                 _maybe_add_note(
                     notes, current_midi, note_start, frame.time,
-                    note_freqs, note_confs, min_note_duration,
+                    note_freqs, note_confs, min_note_duration, time_offset,
                 )
                 current_midi = None
                 note_freqs = []
@@ -90,7 +93,7 @@ def segment_notes(
         end_time = frames[-1].time + 0.01  # Agregar un frame más
         _maybe_add_note(
             notes, current_midi, note_start, end_time,
-            note_freqs, note_confs, min_note_duration,
+            note_freqs, note_confs, min_note_duration, time_offset,
         )
 
     return notes
@@ -104,6 +107,7 @@ def _maybe_add_note(
     frequencies: list[float],
     confidences: list[float],
     min_duration: float,
+    time_offset: float = 0.0,
 ) -> None:
     """Agrega una nota a la lista si cumple con la duración mínima."""
     duration = end_time - start_time
@@ -117,7 +121,7 @@ def _maybe_add_note(
         Note(
             midi_number=midi_number,
             note_name=midi_to_note_name(midi_number),
-            start_time=round(start_time, 4),
+            start_time=round(start_time + time_offset, 4),
             duration=round(duration, 4),
             frequency=round(avg_freq, 2),
             confidence=round(avg_conf, 3),

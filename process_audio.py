@@ -45,8 +45,8 @@ Modelos disponibles:
         default="tiny", help="Modelo TorchCREPE (default: tiny)",
     )
     parser.add_argument(
-        "--confidence", "-c", type=float, default=0.85,
-        help="Umbral de confianza 0-1 (default: 0.85)",
+        "--confidence", "-c", type=float, default=0.95,
+        help="Umbral de confianza 0-1 (default: 0.95)",
     )
 
     args = parser.parse_args()
@@ -71,8 +71,10 @@ Modelos disponibles:
 
     # 2. Cargar y preprocesar
     audio, sr = load_audio(input_file, target_sr=16000, mono=True)
-    audio = preprocess_audio(audio, sr)
+    audio, trim_offset = preprocess_audio(audio, sr)
     print(f"Audio cargado: {len(audio)} samples @ {sr} Hz")
+    if trim_offset > 0:
+        print(f"  Silencio inicial recortado: {trim_offset:.2f}s (offset aplicado a timestamps)")
 
     # 3. Detectar pitch con confianza real del modelo
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -89,6 +91,7 @@ Modelos disponibles:
     notes = segment_notes(
         frames, energy=energy, energy_threshold=threshold,
         confidence_threshold=args.confidence,
+        time_offset=trim_offset,
     )
     print(f"  {len(notes)} notas detectadas (confianza >= {args.confidence})")
 
