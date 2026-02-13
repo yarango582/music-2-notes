@@ -13,6 +13,7 @@ def format_result(
     model_size: str,
     confidence_threshold: float,
     input_file: str | None = None,
+    key_info: list[dict] | None = None,
 ) -> dict:
     """
     Formatea los resultados del análisis como diccionario.
@@ -23,19 +24,24 @@ def format_result(
         model_size: Modelo CREPE usado
         confidence_threshold: Umbral de confianza usado
         input_file: Nombre del archivo de entrada (opcional)
+        key_info: Información de tonalidad por secciones (opcional)
 
     Returns:
         Diccionario con metadata y notas
     """
+    metadata = {
+        "input_file": input_file,
+        "audio_duration": round(audio_duration, 2),
+        "model_size": model_size,
+        "confidence_threshold": confidence_threshold,
+        "notes_detected": len(notes),
+        "processed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if key_info is not None:
+        metadata["key_info"] = key_info
+
     return {
-        "metadata": {
-            "input_file": input_file,
-            "audio_duration": round(audio_duration, 2),
-            "model_size": model_size,
-            "confidence_threshold": confidence_threshold,
-            "notes_detected": len(notes),
-            "processed_at": datetime.now(timezone.utc).isoformat(),
-        },
+        "metadata": metadata,
         "notes": [note.to_dict() for note in notes],
     }
 

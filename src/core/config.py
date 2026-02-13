@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     POST_MERGE_MIN_DURATION: float = 0.06  # segundos
     ONSET_LOOKBACK_FRAMES: int = 5         # frames (50ms)
 
+    # Key detection & outlier filtering
+    KEY_WINDOW_SECONDS: float = 15.0         # ventana para detección de tonalidad
+    KEY_OVERLAP_SECONDS: float = 5.0         # solapamiento entre ventanas
+    KEY_OUTLIER_MAX_DURATION: float = 0.15   # solo filtrar notas < 150ms
+    KEY_OUTLIER_MAX_CONFIDENCE: float = 0.65 # solo filtrar notas con confianza < esto
+
     # Velocity (RMS → MIDI)
     VELOCITY_MIN: int = 30
     VELOCITY_MAX: int = 120

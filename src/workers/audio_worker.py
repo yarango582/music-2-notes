@@ -18,6 +18,7 @@ from src.audio.pitch_post_processor import post_process_pitch
 from src.audio.note_segmenter import (
     segment_notes, merge_same_pitch_notes, refine_onsets, filter_short_notes,
 )
+from src.audio.key_detector import filter_key_outliers, format_key_info
 from src.audio.midi_generator import generate_midi
 from src.audio.json_formatter import format_result, save_json
 from src.core.config import settings
@@ -84,7 +85,11 @@ def _run_audio_pipeline(
     )
     notes = filter_short_notes(notes, min_duration=settings.POST_MERGE_MIN_DURATION)
 
-    # 6. Generar outputs
+    # 8. Detección de tonalidad + filtrado suave de outliers tonales
+    notes, section_keys = filter_key_outliers(notes)
+    key_info = format_key_info(section_keys) if section_keys else None
+
+    # 9. Generar outputs
     results_dir = Path(settings.STORAGE_PATH) / "results" / job_id
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -98,6 +103,7 @@ def _run_audio_pipeline(
         model_size=model_size,
         confidence_threshold=confidence_threshold,
         input_file=audio_filename,
+        key_info=key_info,
     )
     json_path = save_json(result_data, results_dir / f"{stem}.json")
 

@@ -23,6 +23,7 @@ from src.audio.pitch_post_processor import post_process_pitch
 from src.audio.note_segmenter import (
     segment_notes, merge_same_pitch_notes, refine_onsets, filter_short_notes,
 )
+from src.audio.key_detector import filter_key_outliers, format_key_info
 from src.audio.midi_generator import generate_midi
 from src.audio.json_formatter import format_result
 from src.core.config import settings
@@ -120,7 +121,15 @@ Modelos disponibles:
         lookback_frames=settings.ONSET_LOOKBACK_FRAMES,
     )
     notes = filter_short_notes(notes, min_duration=settings.POST_MERGE_MIN_DURATION)
-    print(f"  {len(notes)} notas finales (post merge+onset+filter)")
+    print(f"  {len(notes)} notas (post merge+onset+filter)")
+
+    # 7. Detección de tonalidad + filtrado suave de outliers
+    notes, section_keys = filter_key_outliers(notes)
+    key_info = format_key_info(section_keys) if section_keys else None
+    if section_keys:
+        print(f"  Tonalidad: {section_keys[0].key_name} (corr={section_keys[0].correlation:.3f})")
+        print(f"  {len(section_keys)} secciones analizadas")
+    print(f"  {len(notes)} notas finales (post key filter)")
 
     if not notes:
         print("\nNo se detectaron notas en el audio.")
@@ -140,6 +149,7 @@ Modelos disponibles:
         model_size=args.model,
         confidence_threshold=args.confidence,
         input_file=input_file.name,
+        key_info=key_info,
     )
     json_path = output_dir / f"{stem}.json"
     with open(json_path, "w") as f:
