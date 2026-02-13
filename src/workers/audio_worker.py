@@ -30,45 +30,33 @@ from src.db.repositories.job_repo import (
 )
 
 
-def _run_audio_pipeline(
-    audio_file_path: str,
-    model_size: str,
-    confidence_threshold: float,
-    audio_filename: str,
-    job_id: str,
-) -> dict:
-    """
-    Ejecuta el pipeline de audio SINCRONAMENTE (CPU-bound).
-    Se llama desde un thread para no bloquear asyncio.
-    """
-    # 1. Info del audio
+def _stage_load(audio_file_path: str):
+    """Stage 1: Load and preprocess audio."""
     info = get_audio_info(audio_file_path)
-
-    # 2. Cargar audio
     audio, sr = load_audio(audio_file_path, target_sr=16000, mono=True)
-
-    # 3. Preprocesar (retorna offset del silencio recortado al inicio)
     audio, trim_offset = preprocess_audio(audio, sr)
+    return info, audio, sr, trim_offset
 
-    # 4. Detectar pitch (optimizado: batch=512, fmin/fmax vocal, viterbi)
+
+def _stage_detect(audio, sr, model_size: str):
+    """Stage 2: Detect pitch (heaviest step — torch/CREPE)."""
     frames = detect_pitches(
         audio, sr, model_size=model_size,
         batch_size=settings.CREPE_BATCH_SIZE,
         fmin=settings.CREPE_FMIN,
         fmax=settings.CREPE_FMAX,
     )
-
-    # 5. Post-procesar pitch (filtro mediano + suavizado vibrato)
     frames = post_process_pitch(
         frames,
         median_window=settings.PITCH_MEDIAN_WINDOW,
         vibrato_smooth_window=settings.VIBRATO_SMOOTH_WINDOW,
         vibrato_extent_cents=settings.VIBRATO_EXTENT_CENTS,
     )
+    return frames
 
-    # 6. Calcular energía y segmentar notas
-    #    El trim_offset se suma a los timestamps para mantener sincronización
-    #    con el audio original (ej: si la canción tiene 23s de intro instrumental)
+
+def _stage_segment(frames, audio, sr, trim_offset: float, confidence_threshold: float):
+    """Stage 3: Segment, merge, filter notes + key detection."""
     energy = compute_frame_energy(audio, sr)
     threshold = compute_energy_threshold(energy)
     notes = segment_notes(
@@ -76,25 +64,24 @@ def _run_audio_pipeline(
         confidence_threshold=confidence_threshold,
         time_offset=trim_offset,
     )
-
-    # 7. Post-procesar notas: merge gaps + onset refinement + filter cortas
     notes = merge_same_pitch_notes(notes, max_gap=settings.NOTE_MERGE_MAX_GAP)
     notes = refine_onsets(
         notes, energy=energy, time_offset=trim_offset,
         lookback_frames=settings.ONSET_LOOKBACK_FRAMES,
     )
     notes = filter_short_notes(notes, min_duration=settings.POST_MERGE_MIN_DURATION)
-
-    # 8. Detección de tonalidad + filtrado suave de outliers tonales
     notes, section_keys = filter_key_outliers(notes)
     key_info = format_key_info(section_keys) if section_keys else None
+    return notes, key_info
 
-    # 9. Generar outputs
+
+def _stage_output(notes, key_info, info: dict, audio_filename: str, model_size: str,
+                  confidence_threshold: float, job_id: str):
+    """Stage 4: Generate MIDI, JSON outputs."""
     results_dir = Path(settings.STORAGE_PATH) / "results" / job_id
     results_dir.mkdir(parents=True, exist_ok=True)
 
     stem = Path(audio_filename or "output").stem
-
     midi_path = generate_midi(notes, results_dir / f"{stem}.mid")
 
     result_data = format_result(
@@ -118,10 +105,10 @@ def _run_audio_pipeline(
 
 async def process_audio_job(job_id: str) -> None:
     """
-    Procesa un job de audio completo.
+    Procesa un job de audio en etapas con progreso real.
 
-    El trabajo pesado (torch) se ejecuta en un thread separado
-    para no bloquear la API.
+    Cada etapa pesada se ejecuta en un thread separado
+    para no bloquear el event loop de FastAPI.
     """
     async with async_session() as session:
         try:
@@ -129,20 +116,32 @@ async def process_audio_job(job_id: str) -> None:
             if not job:
                 return
 
-            # Marcar como procesando
-            await update_job_status(session, job_id, JobStatus.PROCESSING, progress=5)
-
-            # Ejecutar pipeline en thread separado (no bloquea la API)
-            result = await asyncio.to_thread(
-                _run_audio_pipeline,
-                audio_file_path=job.audio_file_path,
-                model_size=job.model_size,
-                confidence_threshold=job.confidence_threshold,
-                audio_filename=job.audio_filename,
-                job_id=job_id,
+            # 10% — Loading audio
+            await update_job_status(session, job_id, JobStatus.PROCESSING, progress=10)
+            info, audio, sr, trim_offset = await asyncio.to_thread(
+                _stage_load, job.audio_file_path,
             )
 
-            # Completar job
+            # 30% — Detecting pitch (heaviest step)
+            await update_job_status(session, job_id, JobStatus.PROCESSING, progress=30)
+            frames = await asyncio.to_thread(
+                _stage_detect, audio, sr, job.model_size,
+            )
+
+            # 60% — Segmenting notes
+            await update_job_status(session, job_id, JobStatus.PROCESSING, progress=60)
+            notes, key_info = await asyncio.to_thread(
+                _stage_segment, frames, audio, sr, trim_offset, job.confidence_threshold,
+            )
+
+            # 90% — Generating outputs
+            await update_job_status(session, job_id, JobStatus.PROCESSING, progress=90)
+            result = await asyncio.to_thread(
+                _stage_output, notes, key_info, info, job.audio_filename,
+                job.model_size, job.confidence_threshold, job_id,
+            )
+
+            # 100% — Complete
             await complete_job(
                 session,
                 job_id,
